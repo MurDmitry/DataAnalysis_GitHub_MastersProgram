@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.zip.GZIPInputStream;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -17,6 +18,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.sarp.gharchive.model.GithubEvent;
 import dev.sarp.gharchive.parser.EventParser;
+import dev.sarp.gharchive.writer.DataWriter;
+import dev.sarp.gharchive.writer.impl.ClickHouseWriter;
 
 public class App {
     public String getGreeting() {
@@ -34,7 +37,6 @@ public class App {
                 var text = new InputStreamReader(gzip, StandardCharsets.UTF_8);
                 var reader = new BufferedReader(text)) {
             String line;
-            int count = 0;
 
             EventParser parser = new EventParser(new ObjectMapper());
             long watchEventCount = 0;
@@ -44,29 +46,59 @@ public class App {
             long otherEventCount = 0;
             long validEventCount = 0;
             long invalidEventCount = 0;
+
+            int batchCount = 0;
+            var batch = new ArrayList<GithubEvent>();
+            DataWriter writer = new ClickHouseWriter();
+
             while ((line = reader.readLine()) != null) {
                 allEventsCount++;
-                try {
 
-                    GithubEvent githubEvent = parser.parse(line);
-                    validEventCount++;
-                    switch (githubEvent.type()) {
-                        case "WatchEvent" -> watchEventCount++;
-                        case "PushEvent" -> pushEventCount++;
-                        case "ForkEvent" -> forkEventCount++;
-                        default -> otherEventCount++;
-                    }
-                    if (allEventsCount <= 5) {
-                        System.out.println(githubEvent);
-                    }
+                GithubEvent githubEvent;
+                try {
+                    githubEvent = parser.parse(line);
 
                 } catch (JsonProcessingException
                         | IllegalArgumentException
                         | java.time.format.DateTimeParseException e) {
                     invalidEventCount++;
+                    continue;
                 }
+                 validEventCount++;
+
+                    batch.add(githubEvent);
+                    if (batch.size() == 5000) {
+                        writer.writeBatch(batch);
+                        batchCount++;
+                        batch.clear();
+                    }
+                    switch (githubEvent.type()) {
+                        case "WatchEvent" -> {
+                            watchEventCount++;
+                        }
+                        case "PushEvent" -> {
+                            pushEventCount++;
+                        }
+                        case "ForkEvent" -> {
+                            forkEventCount++;
+                        }
+                        default -> {
+                            otherEventCount++;
+                        }
+                    }
+                    if (allEventsCount <= 5) {
+
+                        System.out.println(githubEvent);
+                    }
 
             }
+
+            if (!batch.isEmpty()) {
+                writer.writeBatch(batch); 
+                batchCount++;
+                batch.clear();
+            }
+            System.out.println("BatchCount : " + batchCount);
             System.out.println("push event count : " + pushEventCount +
                     " | watch event count : " + watchEventCount +
                     " | fork event count: " + forkEventCount +
