@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.sarp.gharchive.model.GithubEvent;
+import dev.sarp.gharchive.parser.EventParser;
 
 public class App {
     public String getGreeting() {
@@ -35,8 +36,7 @@ public class App {
             String line;
             int count = 0;
 
-            ObjectMapper mapper = new ObjectMapper();
-
+            EventParser parser = new EventParser(new ObjectMapper());
             long watchEventCount = 0;
             long pushEventCount = 0;
             long forkEventCount = 0;
@@ -48,48 +48,21 @@ public class App {
                 allEventsCount++;
                 try {
 
-                    // Who is json
-                    JsonNode event = mapper.readTree(line);
-
-                    if (event == null) {
-                        invalidEventCount++;
-                        continue;
-                    }
-
-                    JsonNode typeNode = event.path("type");
-
-                    if (!typeNode.isTextual() || typeNode.asText().isBlank()) {
-                        invalidEventCount++;
-                        continue;
-                    }
-
-                    String type = typeNode.asText();
+                    GithubEvent githubEvent = parser.parse(line);
                     validEventCount++;
-                    String eventId = event.path("id").asText();
-
-                    Instant createdAt = Instant.parse(
-                            event.path("created_at").asText());
-
-                    long repoId = event.path("repo").path("id").asLong();
-                    String repoName = event.path("repo").path("name").asText();
-
-                    long actorId = event.path("actor").path("id").asLong();
-                    //System.out.println(type + " | " + repoName + " | " + createdAt);
-                    var testDto = new GithubEvent(eventId, type, createdAt, repoId, repoName, actorId);
-                    
-                    switch (type) {
+                    switch (githubEvent.type()) {
                         case "WatchEvent" -> watchEventCount++;
                         case "PushEvent" -> pushEventCount++;
                         case "ForkEvent" -> forkEventCount++;
                         default -> otherEventCount++;
                     }
                     if (allEventsCount <= 5) {
-                        System.out.println(testDto);
+                        System.out.println(githubEvent);
                     }
-                   
 
-                } catch (JsonProcessingException e) {
-                    // TODO: handle exception
+                } catch (JsonProcessingException
+                        | IllegalArgumentException
+                        | java.time.format.DateTimeParseException e) {
                     invalidEventCount++;
                 }
 
